@@ -221,7 +221,7 @@ class VerifyView(View):
         if verified and verified in interaction.user.roles:
             warn = discord.Embed(
                 title="⚠️ BẠN ĐÃ XÁC MINH RỒI!",
-                description="> Tài khoản của bạn đã được xác minh trước đó.",
+                description="> Tài khoản của bạn đã được xác minh trước đó r xac minh nua = ban",
                 color=MAU_CHINH
             )
             await interaction.response.send_message(embed=warn, ephemeral=True)
