@@ -1,45 +1,38 @@
+import os
 import discord
 from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
+from flask import Flask
+from threading import Thread
 import random
 import string
 from datetime import datetime
-import os
-import sys
 
 # ================== CẤU HÌNH ==================
+# Token đọc từ Environment Variable (Render/GitHub KHÔNG thấy token!)
 TOKEN = os.environ.get("TOKEN")
 VERIFY_CHANNEL_ID = 1548735130057711636  # ID kênh verify
-VERIFIED_ROLE_NAME = "VERIFIED"      # Role sau khi verify
-UNVERIFIED_ROLE_NAME = "UNVERIFIED"  # Role khi mới vào server
+VERIFIED_ROLE_NAME = "VERIFIED"          # Role sau khi verify
+UNVERIFIED_ROLE_NAME = "UNVERIFIED"      # Role khi mới vào server
 
 GIF_URL = "https://i.pinimg.com/originals/ca/9f/e9/ca9fe9e1c1aad2d7767cf7dfb9396540.gif"
 
 MAU_CHINH = 0x000000      # ⚫ Đen
 MAU_THANH_CONG = 0x000000 # ⚫ Đen
 MAU_LOI = 0x000000        # ⚫ Đen
+# ===============================================
 
-# ================== ĐỌC TOKEN TỪ FILE ==================
-def load_token():
-    """Đọc token từ file token.txt"""
-    if not os.path.exists("token.txt"):
-        print("=" * 50)
-        print("❌ KHÔNG TÌM THẤY FILE token.txt!")
-        print("👉 Tạo file token.txt cùng thư mục với bot.py")
-        print("   Bên trong file chỉ dán token bot vào.")
-        print("=" * 50)
-        sys.exit(1)
+# --- Server web giữ cho Render không tắt bot ---
+app = Flask(__name__)
 
-    with open("token.txt", "r", encoding="utf-8") as f:
-        token = f.read().strip()
+@app.route("/")
+def home():
+    return "Bot verify dang chay! ✅"
 
-    if not token:
-        print("❌ File token.txt đang trống! Dán token bot vào trong file.")
-        sys.exit(1)
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
 
-    return token
-
-
+# ----------------- BOT -----------------
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -254,12 +247,20 @@ async def on_member_join(member: discord.Member):
         except discord.Forbidden:
             print(f"❌ Không đủ quyền add role cho: {member.name}")
 
-    channel = guild.get_channel(VERIFY_CHANNEL_ID)
-    if channel:
-        try:
-            await channel.send(embed=create_welcome_embed(member))
-        except discord.Forbidden:
-            pass
+    # 📩 Gửi DM riêng — CHỈ người đó thấy
+    try:
+        await member.send(embed=create_welcome_embed(member))
+        print(f"📩 Đã gửi DM chào mừng cho: {member.name}")
+    except discord.Forbidden:
+        # Người đó tắt DM → gửi vào kênh verify + tự xóa sau 30s
+        print(f"⚠️ {member.name} tắt DM — gửi vào kênh verify (tự xóa 30s)")
+        channel = guild.get_channel(VERIFY_CHANNEL_ID)
+        if channel:
+            try:
+                msg = await channel.send(embed=create_welcome_embed(member))
+                await msg.delete(delay=30)
+            except discord.Forbidden:
+                pass
 
 
 # ================== SỰ KIỆN BOT KHỞI ĐỘNG ==================
@@ -267,6 +268,14 @@ async def on_member_join(member: discord.Member):
 async def on_ready():
     print(f"🤖 Bot đã online: {bot.user}")
     bot.add_view(VerifyView())
+
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="ai chua verify 👀"
+        )
+    )
 
     for guild in bot.guilds:
         if not get_verified_role(guild):
@@ -311,20 +320,20 @@ async def help(ctx):
     if ctx.author.guild_permissions.administrator:
         desc = (
             "╭「 📋 **LỆNH ADMIN** 」╮\n"
-            "> 🔧 `!setup` — Tự chặn UNVERIFIED ở mọi kênh (chỉ mở kênh verify)\n"
+            "> 🔧 `!setup` — Tự chặn UNVERIFIED ở mọi kênh\n"
             "> 📨 `!resend` — Gửi lại tin nhắn verify\n"
-            "> 🔍 `!checkrole` — Xem trạng thái 2 role verify\n"
-            "> 👤 `!unverify @user` — Gỡ verify của thành viên\n"
-            "> ✅ `!verify @user` — Verify hộ thành viên\n\n"
+            "> 🔍 `!checkrole` — Xem trạng thái 2 role\n"
+            "> 👤 `!unverify @user` — Gỡ verify\n"
+            "> ✅ `!verify @user` — Verify hộ\n\n"
             "╭「 🌐 **LỆNH MỌI NGƯỜI** 」╮\n"
-            "> ❓ `!help` — Xem danh sách lệnh này\n"
-            "> 🔒 Bấm nút **Xác Minh** trong kênh verify để mở khóa!"
+            "> ❓ `!help` — Xem lệnh này\n"
+            "> 🔒 Bấm nút **✅ Xác Minh** để mở khóa!"
         )
     else:
         desc = (
             "╭「 🌐 **LỆNH** 」╮\n"
             "> ❓ `!help` — Xem danh sách lệnh\n"
-            "> 🔒 Vào kênh verify và bấm **✅ Xác Minh** để mở khóa server!"
+            "> 🔒 Bấm nút **✅ Xác Minh** trong kênh verify!"
         )
 
     embed = discord.Embed(
@@ -365,12 +374,12 @@ async def checkrole(ctx):
         color=MAU_CHINH
     )
     embed.add_field(
-        name=f"✅ Role {VERIFIED_ROLE_NAME}",
+        name=f"✅ {VERIFIED_ROLE_NAME}",
         value=f"> Tồn tại: **{'Có' if verified else '❌ Chưa'}**\n> Số người: **{len(verified.members) if verified else 0}**",
         inline=True
     )
     embed.add_field(
-        name=f"🔴 Role {UNVERIFIED_ROLE_NAME}",
+        name=f"🔴 {UNVERIFIED_ROLE_NAME}",
         value=f"> Tồn tại: **{'Có' if unverified else '❌ Chưa'}**\n> Số người: **{len(unverified.members) if unverified else 0}**",
         inline=True
     )
@@ -392,10 +401,9 @@ async def unverify(ctx, member: discord.Member):
 
     embed = discord.Embed(
         title="🔴 ĐÃ GỠ VERIFY",
-        description=f"> Thành viên: {member.mention}\n> Đã trả role **{UNVERIFIED_ROLE_NAME}** — phải xác minh lại!",
+        description=f"> Thành viên: {member.mention}\n> Phải xác minh lại!",
         color=MAU_LOI
     )
-    embed.set_image(url=GIF_URL)
     await ctx.send(embed=embed)
 
 
@@ -416,7 +424,6 @@ async def verify(ctx, member: discord.Member):
         description=f"> Thành viên: {member.mention}\n> Người verify: {ctx.author.mention}",
         color=MAU_THANH_CONG
     )
-    embed.set_image(url=GIF_URL)
     await ctx.send(embed=embed)
 
 
@@ -433,5 +440,6 @@ async def on_command_error(ctx, error):
 
 # ================== CHẠY BOT ==================
 if __name__ == "__main__":
-    TOKEN = load_token()
+    # Chạy web server ở luồng riêng (chống Render tắt service)
+    Thread(target=run_web, daemon=True).start()
     bot.run(TOKEN)
